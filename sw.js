@@ -37,7 +37,9 @@ self.addEventListener("activate", (event) => {
 function fromNetwork(request) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("slow")), NETWORK_WAIT_MS);
-    fetch(request).then((res) => {
+    // "no-cache" asks GitHub whether the file changed, instead of reusing the
+    // browser's copy for up to 10 minutes after an update.
+    fetch(request, { cache: "no-cache" }).then((res) => {
       clearTimeout(timer);
       if (res.ok) {
         const copy = res.clone();
