@@ -11,8 +11,8 @@
 
   const MACROS = ["kcal", "protein", "carbs", "fat"];
   // Meal headings, in the order the Meals tab shows them.
-  const CATEGORIES = ["Breakfast", "Bowls", "Burritos & wraps", "Pasta", "Sandwiches & pizza", "Soups & bakes",
-    "Desserts & snacks", "Shakes & drinks", "Sauces", "Other"];
+  const CATEGORIES = ["Breakfast", "Mains", "Bowls", "Burritos & wraps", "Pasta", "Sandwiches & pizza", "Soups & bakes",
+    "Sides", "Desserts & snacks", "Shakes & drinks", "Sauces", "Other"];
 
   /** Meals grouped under their headings, in heading order, A–Z within each.
    *  A meal with no heading, or one this app doesn't know, goes under Other. */

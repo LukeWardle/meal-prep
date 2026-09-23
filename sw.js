@@ -5,7 +5,7 @@
  * cached copy. Bump CACHE when the files change.
  */
 
-const CACHE = "mealprep-v7";
+const CACHE = "mealprep-1aa7d55c24";
 const SHELL = [
   "./",
   "./index.html",
