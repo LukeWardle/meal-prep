@@ -593,7 +593,7 @@ function renderMeals(app) {
 
 function mealCard(meal, foods, category) {
   const totals = L.mealTotals(meal, foods);
-  const link = meal.source && meal.source.kind === "youtube" && safeLink(meal.source.url);
+  const link = meal.source && ["youtube", "web"].includes(meal.source.kind) && safeLink(meal.source.url);
   return h("div", { class: "card tap", "data-name": meal.name.toLowerCase(), "data-group": category,
     onclick: () => openMeal(clone(meal)) },
     h("div", { class: "row between" },
@@ -665,14 +665,15 @@ function mealEditor(app, d) {
   },
     h("option", { value: "", selected: !d.source.kind }, "Nowhere / my own"),
     h("option", { value: "book", selected: d.source.kind === "book" }, "A book"),
-    h("option", { value: "youtube", selected: d.source.kind === "youtube" }, "A YouTube video"));
+    h("option", { value: "youtube", selected: d.source.kind === "youtube" }, "A YouTube video"),
+    h("option", { value: "web", selected: d.source.kind === "web" }, "A website"));
 
   const sourceFields = d.source.kind === "book"
     ? h("div", { class: "grid2" },
       field("Book", h("input", { value: d.source.title || "", oninput: (e) => { d.source.title = e.target.value; } })),
       field("Page", h("input", { inputmode: "numeric", value: d.source.page || "",
         oninput: (e) => { d.source.page = e.target.value; } })))
-    : d.source.kind === "youtube"
+    : ["youtube", "web"].includes(d.source.kind)
       ? h("div", { class: "stack" },
         field("Video link", h("input", { type: "url", value: d.source.url || "", placeholder: "https://youtube.com/…",
           oninput: (e) => { d.source.url = e.target.value.trim(); } })),
@@ -742,7 +743,7 @@ function saveMeal(d) {
     .filter((l) => l.ingredientId && num(l.amount) > 0)
     .map((l) => ({ ingredientId: l.ingredientId, amount: num(l.amount), ...(l.us ? { us: l.us } : {}) }));
   if (!lines.length) return toast("Add at least one ingredient with an amount.");
-  if (d.source.kind === "youtube" && d.source.url && !safeLink(d.source.url)) {
+  if (["youtube", "web"].includes(d.source.kind) && d.source.url && !safeLink(d.source.url)) {
     return toast("The video link should start with https://");
   }
   const meal = { id: d.id, name, category: d.category || "Other", portions, source: d.source, lines };

@@ -11,7 +11,8 @@
 
   const MACROS = ["kcal", "protein", "carbs", "fat"];
   // Meal headings, in the order the Meals tab shows them.
-  const CATEGORIES = ["Breakfast", "Mains", "Bowls", "Burritos & wraps", "Pasta", "Sandwiches & pizza", "Soups & bakes",
+  const CATEGORIES = ["Breakfast", "Mains", "Fakeaways", "Bowls", "Burritos & wraps", "Pasta", "Sandwiches & pizza",
+    "Soups & bakes",
     "Sides", "Desserts & snacks", "Shakes & drinks", "Sauces", "Other"];
 
   /** Meals grouped under their headings, in heading order, A–Z within each.
