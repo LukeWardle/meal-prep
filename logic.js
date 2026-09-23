@@ -268,9 +268,18 @@
     const newMeals = pack.meals.filter((m) => !haveMeal.has(m.id) && !skip.has(m.id));
     const shops = [...state.shops];
     for (const s of pack.shops || []) if (!shops.includes(s)) shops.push(s);
+    // Built-in meals that have been withdrawn (duplicates, mistakes) are removed,
+    // and taken off the shopping list.
+    const retired = new Set(pack.retired || []);
+    const current = state.meals.filter((m) => !retired.has(m.id));
+    const removed = state.meals.length - current.length;
+    let prep = state.prep;
+    if (removed && prep && prep.items) {
+      prep = { ...prep, items: Object.fromEntries(Object.entries(prep.items).filter(([id]) => !retired.has(id))) };
+    }
     // Meals added before headings existed get their heading; one you've set is kept.
     const packCategory = new Map(pack.meals.map((m) => [m.id, m.category]));
-    const kept = state.meals.map((m) => (!m.category && packCategory.get(m.id)
+    const kept = current.map((m) => (!m.category && packCategory.get(m.id)
       ? { ...m, category: packCategory.get(m.id) } : m));
     // Same for allergy flags on foods added before they existed. A food whose
     // flags you've set yourself (allergens present, even empty) is left alone.
@@ -278,10 +287,12 @@
     const keptFoods = state.ingredients.map((i) => (!Array.isArray(i.allergens) && Array.isArray(packAllergens.get(i.id))
       ? { ...i, allergens: packAllergens.get(i.id) } : i));
     return {
-      state: { ...state, shops, ingredients: [...keptFoods, ...newFoods], meals: [...kept, ...newMeals] },
+      state: { ...state, ...(prep ? { prep } : {}), shops, ingredients: [...keptFoods, ...newFoods],
+        meals: [...kept, ...newMeals] },
+      removed,
       added: { foods: newFoods.length, meals: newMeals.length },
       addedIds: [...newFoods, ...newMeals].map((x) => x.id),
-      filled: kept.filter((m, i) => m !== state.meals[i]).length
+      filled: removed + kept.filter((m, i) => m !== current[i]).length
         + keptFoods.filter((f, i) => f !== state.ingredients[i]).length,
       kept: { foods: pack.ingredients.length - newFoods.length, meals: pack.meals.length - newMeals.length },
     };
