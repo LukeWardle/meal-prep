@@ -39,7 +39,11 @@ function fromNetwork(request) {
     const timer = setTimeout(() => reject(new Error("slow")), NETWORK_WAIT_MS);
     // "no-cache" asks GitHub whether the file changed, instead of reusing the
     // browser's copy for up to 10 minutes after an update.
-    fetch(request, { cache: "no-cache" }).then((res) => {
+    // A page load (mode "navigate") can't be copied with new options, so rebuild it from its URL.
+    const fresh = request.mode === "navigate"
+      ? new Request(request.url, { cache: "no-cache" })
+      : new Request(request, { cache: "no-cache" });
+    fetch(fresh).then((res) => {
       clearTimeout(timer);
       if (res.ok) {
         const copy = res.clone();
