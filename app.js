@@ -427,6 +427,15 @@ function foodEditor(app, d) {
         field("Measured in", unitSelect),
         field("Usually bought at", shopSelect)),
       d.note ? h("p", { class: "faint", text: `Recipe swap: ${d.note}` }) : null,
+      h("div", null, h("label", { text: "Allergy warning" }),
+        h("div", { class: "row", style: "flex-wrap:wrap" }, ALLERGENS.map((a) => h("label", { class: "row check" },
+          h("input", { type: "checkbox", checked: (d.allergens || []).includes(a),
+            onchange: (e) => {
+              const set = new Set(d.allergens || []);
+              if (e.target.checked) set.add(a); else set.delete(a);
+              d.allergens = [...set];
+            } }),
+          `Contains ${a}`)))),
       d.estimated && d.usualShop !== CUPBOARD
         ? h("p", { class: "pill warn", text: "These are typical UK values, not from your packet. Scan the barcode "
           + "or type in the label to replace them." }) : null));
@@ -505,6 +514,7 @@ function saveFood(d) {
   }
   const food = { id: d.id, name, unit: d.unit, usualShop: d.usualShop, products };
   if (d.note) food.note = d.note;
+  food.allergens = d.allergens || [];
   // Typical values stay marked until the label is scanned or typed in.
   if (d.estimated && !d.scanned && !d.touched) food.estimated = true;
   const i = state.ingredients.findIndex((x) => x.id === d.id);
@@ -589,6 +599,7 @@ function mealCard(meal, foods, category) {
     h("div", { class: "row between" },
       h("h3", { text: meal.name }),
       h("span", { class: "faint", text: `${meal.portions} portions` })),
+    allergyBadge(meal, foods),
     sourceText(meal.source) ? h("div", { class: "faint" },
       link ? h("a", { href: link, target: "_blank", rel: "noopener",
         onclick: (e) => e.stopPropagation() }, sourceText(meal.source)) : sourceText(meal.source)) : null,
@@ -600,6 +611,15 @@ function mealCard(meal, foods, category) {
     h("button", { class: "small", style: "margin-top:10px",
       onclick: (e) => { e.stopPropagation(); addToList(meal); } },
       state.prep.items[meal.id] ? `On the list ×${state.prep.items[meal.id]} · add another` : "Add to shopping list"));
+}
+
+const ALLERGENS = ["peanuts", "tree nuts"];
+
+/** A red warning when a meal uses a food flagged with an allergen. */
+function allergyBadge(meal, foods = ingredientsById()) {
+  const found = L.mealAllergens(meal, foods);
+  if (!found.length) return null;
+  return h("div", { class: "allergy", role: "note", text: `⚠ Contains ${found.join(" and ")}` });
 }
 
 /** The recipe author's own per-portion numbers, for comparing with the UK version. */
@@ -662,6 +682,7 @@ function mealEditor(app, d) {
 
   app.append(
     h("h1", { text: isNew ? "New meal" : d.name || "Meal" }),
+    allergyBadge(d),
     h("div", { class: "card stack" },
       field("Name", h("input", { value: d.name, placeholder: "Chicken rice bowl", autocomplete: "off",
         oninput: (e) => { d.name = e.target.value; } })),
@@ -780,6 +801,7 @@ function mealPicker(app) {
       },
         h("div", { class: "grow" },
           h("h3", { text: meal.name }),
+          allergyBadge(meal),
           h("div", { class: "faint", text: batches
             ? `${batches === 1 ? "1 batch" : `${batches} batches`} · ${batches * meal.portions} portions`
             : `${meal.portions} portions a batch` })),

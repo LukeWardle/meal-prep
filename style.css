@@ -40,6 +40,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Search hides cards and headings with the hidden attribute; flex layouts would otherwise override it. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -139,6 +141,17 @@ input[type="checkbox"] { width: 26px; min-height: 26px; height: 26px; accent-col
 
 .pill { display: inline-block; padding: 2px 8px; border-radius: 99px; background: var(--accent-t); color: var(--accent); font-size: 0.8rem; }
 .pill.warn { background: var(--warn-t); color: var(--warn); }
+
+.allergy {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+label.check { color: var(--ink); font-size: 0.95rem; margin: 4px 12px 4px 0; gap: 8px; }
 
 .group-head {
   display: flex;

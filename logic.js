@@ -152,6 +152,16 @@
       .map(([shop, items]) => ({ shop, items: items.sort((a, b) => a.name.localeCompare(b.name)) }));
   }
 
+  /** Every allergen in a meal, from its foods' flags: ["peanuts", "tree nuts"]. */
+  function mealAllergens(meal, ingredientsById) {
+    const found = new Set();
+    for (const line of meal.lines || []) {
+      const food = ingredientsById[line.ingredientId];
+      for (const a of (food && food.allergens) || []) found.add(a);
+    }
+    return [...found].sort();
+  }
+
   /** Totals for one day of eaten portions. Each record carries the macros it had
    *  when it was logged, so editing a meal later never rewrites what you ate. */
   function dayTotals(eaten, date) {
@@ -262,11 +272,17 @@
     const packCategory = new Map(pack.meals.map((m) => [m.id, m.category]));
     const kept = state.meals.map((m) => (!m.category && packCategory.get(m.id)
       ? { ...m, category: packCategory.get(m.id) } : m));
+    // Same for allergy flags on foods added before they existed. A food whose
+    // flags you've set yourself (allergens present, even empty) is left alone.
+    const packAllergens = new Map(pack.ingredients.map((i) => [i.id, i.allergens]));
+    const keptFoods = state.ingredients.map((i) => (!Array.isArray(i.allergens) && Array.isArray(packAllergens.get(i.id))
+      ? { ...i, allergens: packAllergens.get(i.id) } : i));
     return {
-      state: { ...state, shops, ingredients: [...state.ingredients, ...newFoods], meals: [...kept, ...newMeals] },
+      state: { ...state, shops, ingredients: [...keptFoods, ...newFoods], meals: [...kept, ...newMeals] },
       added: { foods: newFoods.length, meals: newMeals.length },
       addedIds: [...newFoods, ...newMeals].map((x) => x.id),
-      filled: kept.filter((m, i) => m !== state.meals[i]).length,
+      filled: kept.filter((m, i) => m !== state.meals[i]).length
+        + keptFoods.filter((f, i) => f !== state.ingredients[i]).length,
       kept: { foods: pack.ingredients.length - newFoods.length, meals: pack.meals.length - newMeals.length },
     };
   }
@@ -294,7 +310,7 @@
 
   root.MealLogic = {
     MACROS, UNITS, CATEGORIES, groupMeals, labelFactor, productFor, mealTotals, perPortion, packsNeeded,
-    shoppingList, addExtras, dayTotals, formatAmount, validateBackup,
+    shoppingList, addExtras, mealAllergens, dayTotals, formatAmount, validateBackup,
     parseQuantity, fromOpenFoodFacts, guessShop, mergeMeals,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
