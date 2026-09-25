@@ -602,7 +602,11 @@ function mealCard(meal, foods, category) {
     allergyBadge(meal, foods),
     sourceText(meal.source) ? h("div", { class: "faint" },
       link ? h("a", { href: link, target: "_blank", rel: "noopener",
-        onclick: (e) => e.stopPropagation() }, sourceText(meal.source)) : sourceText(meal.source)) : null,
+        onclick: (e) => e.stopPropagation() }, meal.source.kind === "youtube" ? `${sourceText(meal.source)} (video)` : sourceText(meal.source))
+        : sourceText(meal.source),
+      safeLink(meal.source.page) ? [" · ", h("a", { href: meal.source.page, target: "_blank", rel: "noopener",
+        onclick: (e) => e.stopPropagation() }, "recipe page")] : null) : null,
+    mealNotes(meal),
     h("div", { class: "faint", text: "Per portion" }),
     macroGrid(L.perPortion(totals, meal.portions)),
     hisLine(meal),
@@ -620,6 +624,12 @@ function allergyBadge(meal, foods = ingredientsById()) {
   const found = L.mealAllergens(meal, foods);
   if (!found.length) return null;
   return h("div", { class: "allergy", role: "note", text: `⚠ Contains ${found.join(" and ")}` });
+}
+
+/** Notes added when a recipe was converted: a peanut oil swap, nuts to leave off, adjusted portions. */
+function mealNotes(meal) {
+  if (!meal.notes || !meal.notes.length) return null;
+  return h("ul", { class: "notes" }, meal.notes.map((n) => h("li", { text: n })));
 }
 
 /** The recipe author's own per-portion numbers, for comparing with the UK version. */
@@ -684,6 +694,7 @@ function mealEditor(app, d) {
   app.append(
     h("h1", { text: isNew ? "New meal" : d.name || "Meal" }),
     allergyBadge(d),
+    mealNotes(d),
     h("div", { class: "card stack" },
       field("Name", h("input", { value: d.name, placeholder: "Chicken rice bowl", autocomplete: "off",
         oninput: (e) => { d.name = e.target.value; } })),
@@ -747,6 +758,7 @@ function saveMeal(d) {
     return toast("The video link should start with https://");
   }
   const meal = { id: d.id, name, category: d.category || "Other", portions, source: d.source, lines };
+  if (d.notes && d.notes.length) meal.notes = d.notes;
   if (d.his) meal.his = d.his;
   const i = state.meals.findIndex((m) => m.id === d.id);
   if (i === -1) state.meals.push(meal); else state.meals[i] = meal;
