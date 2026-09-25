@@ -13,7 +13,7 @@
   // Meal headings, in the order the Meals tab shows them.
   const CATEGORIES = ["Breakfast", "Mains", "Fakeaways", "Bowls", "Burritos & wraps", "Pasta", "Sandwiches & pizza",
     "Soups & bakes",
-    "Sides", "Desserts & snacks", "Shakes & drinks", "Sauces", "Other"];
+    "Sides", "Desserts & snacks", "Shakes & drinks", "Sauces", "To try", "Other"];
 
   /** Meals grouped under their headings, in heading order, A–Z within each.
    *  A meal with no heading, or one this app doesn't know, goes under Other. */
@@ -151,6 +151,30 @@
       .filter(([, items]) => items.length)
       .sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]))
       .map(([shop, items]) => ({ shop, items: items.sort((a, b) => a.name.localeCompare(b.name)) }));
+  }
+
+  /** The first web link in some shared text: "Watch this! https://youtu.be/abc" → the link. */
+  function findLink(text) {
+    const m = String(text || "").match(/https?:\/\/[^\s<>"']+/i);
+    return m ? m[0].replace(/[).,!?]+$/, "") : null;
+  }
+
+  /** A readable name from a recipe link, for when none is typed:
+   *  ".../recipes/healthy-chicken-karahi/" → "Healthy chicken karahi". */
+  function nameFromLink(url) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^www\./, "");
+      if (/youtu\.?be/.test(host)) return "YouTube recipe";
+      const parts = u.pathname.split("/").filter(Boolean);
+      const slug = parts.reverse().find((p) => /[a-z]/i.test(p) && !/^(recipes?|index\.html?|watch|p)$/i.test(p));
+      if (!slug) return `Recipe from ${host}`;
+      const words = decodeURIComponent(slug).replace(/\.[a-z]+$/i, "").replace(/[-_+]+/g, " ")
+        .replace(/\b(recipe|meal prep)\b$/i, "").trim();
+      return words ? words.charAt(0).toUpperCase() + words.slice(1).toLowerCase() : `Recipe from ${host}`;
+    } catch {
+      return "Saved recipe";
+    }
   }
 
   /** Every allergen in a meal, from its foods' flags: ["peanuts", "tree nuts"]. */
@@ -322,7 +346,7 @@
 
   root.MealLogic = {
     MACROS, UNITS, CATEGORIES, groupMeals, labelFactor, productFor, mealTotals, perPortion, packsNeeded,
-    shoppingList, addExtras, mealAllergens, dayTotals, formatAmount, validateBackup,
+    shoppingList, addExtras, mealAllergens, findLink, nameFromLink, dayTotals, formatAmount, validateBackup,
     parseQuantity, fromOpenFoodFacts, guessShop, mergeMeals,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);

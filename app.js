@@ -206,7 +206,9 @@ function sourceText(source) {
   if (source.kind === "book") {
     return [source.title || "Book", source.page ? `page ${source.page}` : ""].filter(Boolean).join(", ");
   }
-  return source.title || "YouTube";
+  if (source.title) return source.title;
+  if (source.kind === "youtube") return "YouTube";
+  try { return new URL(source.url).hostname.replace(/^www\./, ""); } catch { return "Website"; }
 }
 
 /* ---------------------------------------------------------------- barcode */
@@ -564,7 +566,10 @@ function renderMeals(app) {
 
   app.append(h("div", { class: "row between" },
     h("h1", { text: "Meals" }),
-    h("button", { class: "primary small", onclick: () => openMeal(newMeal()) }, "Add meal")));
+    h("div", { class: "row" },
+      h("button", { class: "small", onclick: () => { ui.linkForm = !ui.linkForm; render(); } }, "Save a link"),
+      h("button", { class: "primary small", onclick: () => openMeal(newMeal()) }, "Add meal"))));
+  if (ui.linkForm) app.append(linkForm());
 
   if (!state.meals.length) {
     app.append(h("div", { class: "empty" },
@@ -598,7 +603,7 @@ function mealCard(meal, foods, category) {
     onclick: () => openMeal(clone(meal)) },
     h("div", { class: "row between" },
       h("h3", { text: meal.name }),
-      h("span", { class: "faint", text: `${meal.portions} portions` })),
+      meal.lines.length ? h("span", { class: "faint", text: `${meal.portions} portions` }) : null),
     allergyBadge(meal, foods),
     sourceText(meal.source) ? h("div", { class: "faint" },
       link ? h("a", { href: link, target: "_blank", rel: "noopener",
@@ -607,14 +612,16 @@ function mealCard(meal, foods, category) {
       safeLink(meal.source.page) ? [" · ", h("a", { href: meal.source.page, target: "_blank", rel: "noopener",
         onclick: (e) => e.stopPropagation() }, "recipe page")] : null) : null,
     mealNotes(meal),
-    h("div", { class: "faint", text: "Per portion" }),
-    macroGrid(L.perPortion(totals, meal.portions)),
-    hisLine(meal),
-    totals.missing.length
-      ? h("p", { class: "faint warn", text: `Short: no label for ${totals.missing.join(", ")}.` }) : null,
-    h("button", { class: "small", style: "margin-top:10px",
-      onclick: (e) => { e.stopPropagation(); addToList(meal); } },
-      state.prep.items[meal.id] ? `On the list ×${state.prep.items[meal.id]} · add another` : "Add to shopping list"));
+    ...(meal.lines.length ? [
+      h("div", { class: "faint", text: "Per portion" }),
+      macroGrid(L.perPortion(totals, meal.portions)),
+      hisLine(meal),
+      totals.missing.length
+        ? h("p", { class: "faint warn", text: `Short: no label for ${totals.missing.join(", ")}.` }) : null,
+      h("button", { class: "small", style: "margin-top:10px",
+        onclick: (e) => { e.stopPropagation(); addToList(meal); } },
+        state.prep.items[meal.id] ? `On the list ×${state.prep.items[meal.id]} · add another` : "Add to shopping list"),
+    ] : [h("p", { class: "faint", text: "Link only. Tap to add the ingredients and get macros and a shopping list." })]));
 }
 
 const ALLERGENS = ["peanuts", "tree nuts"];
@@ -746,18 +753,22 @@ function mealEditor(app, d) {
 }
 
 function saveMeal(d) {
-  const name = d.name.trim();
-  if (!name) return toast("Give the meal a name.");
+  if (["youtube", "web"].includes(d.source.kind) && d.source.url && !safeLink(d.source.url)) {
+    return toast("The link should start with https://");
+  }
+  const link = ["youtube", "web"].includes(d.source.kind) ? safeLink(d.source.url) : null;
+  // With a link, the name can be left blank: it's taken from the link.
+  const name = d.name.trim() || (link ? L.nameFromLink(link) : "");
+  if (!name) return toast("Add a link to the recipe, or a name and ingredients.");
   const portions = num(d.portions);
   if (!(portions > 0)) return toast("Portions must be more than 0.");
   const lines = d.lines
     .filter((l) => l.ingredientId && num(l.amount) > 0)
     .map((l) => ({ ingredientId: l.ingredientId, amount: num(l.amount), ...(l.us ? { us: l.us } : {}) }));
-  if (!lines.length) return toast("Add at least one ingredient with an amount.");
-  if (["youtube", "web"].includes(d.source.kind) && d.source.url && !safeLink(d.source.url)) {
-    return toast("The video link should start with https://");
-  }
-  const meal = { id: d.id, name, category: d.category || "Other", portions, source: d.source, lines };
+  // A link on its own is enough ("save it for later"); otherwise ingredients are needed.
+  if (!lines.length && !link) return toast("Add at least one ingredient, or a link to the recipe.");
+  const category = !lines.length && (!d.category || d.category === "Other") ? "To try" : (d.category || "Other");
+  const meal = { id: d.id, name, category, portions, source: d.source, lines };
   if (d.notes && d.notes.length) meal.notes = d.notes;
   if (d.his) meal.his = d.his;
   const i = state.meals.findIndex((m) => m.id === d.id);
@@ -766,6 +777,38 @@ function saveMeal(d) {
   ui.edit = null;
   toast(`${name} saved.`);
   render();
+}
+
+/** Paste a link (and optionally a name) to keep a recipe for later. */
+function linkForm() {
+  const url = h("input", { type: "url", placeholder: "Paste the recipe or video link", autocomplete: "off",
+    "aria-label": "Recipe link" });
+  const name = h("input", { placeholder: "Name (optional, taken from the link)", autocomplete: "off",
+    "aria-label": "Name" });
+  const go = () => { if (saveLink(url.value, name.value)) { ui.linkForm = false; render(); } };
+  setTimeout(() => url.focus(), 0);
+  return h("div", { class: "card stack" },
+    h("h3", { text: "Save a recipe for later" }), url, name,
+    h("div", { class: "grid2" },
+      h("button", { class: "primary", onclick: go }, "Save"),
+      h("button", { onclick: () => { ui.linkForm = false; render(); } }, "Cancel")),
+    h("p", { class: "faint", text: "Tip: in YouTube or Chrome, tap Share → Meal Prep to save a link without copying it." }));
+}
+
+/** Saves a recipe link as a meal with no ingredients yet, under "To try". */
+function saveLink(text, typedName = "") {
+  const url = L.findLink(text);
+  if (!url || !safeLink(url)) return toast("That doesn't look like a web link (it should start with https://).");
+  const existing = state.meals.find((m) => m.source && m.source.url === url);
+  if (existing) return toast(`Already saved: ${existing.name}.`);
+  const kind = /youtu\.?be/i.test(url) ? "youtube" : "web";
+  const name = typedName.trim() || L.nameFromLink(url);
+  state.meals.push({ id: uid(), name, category: "To try", portions: DEFAULT_PORTIONS,
+    source: { kind, url, title: "" }, lines: [] });
+  save();
+  ui.openGroups.add("To try");
+  toast(`Saved "${name}" under To try.`);
+  return true;
 }
 
 function deleteMeal(d) {
@@ -798,7 +841,8 @@ function mealPicker(app) {
     : "Tap a meal to add its ingredients. Tap again for another batch." }));
   let portions = 0;
   const cards = h("div");
-  const groups = L.groupMeals([...state.meals]);
+  // Link-only meals have nothing to buy yet.
+  const groups = L.groupMeals(state.meals.filter((m) => m.lines.length));
   for (const group of groups) {
     if (groups.length > 1) cards.append(groupHead(group.category, group.meals.length, null));
     for (const meal of group.meals) {
@@ -1209,6 +1253,18 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   window.scrollTo(0, 0);
   render();
 });
+
+/* Share → Meal Prep (Android): the phone opens the app with ?title=&text=&url=.
+ * YouTube puts the link in "text" and the video title in "title". */
+(() => {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("url") && !params.has("text")) return;
+  const text = `${params.get("url") || ""} ${params.get("text") || ""}`;
+  const title = (params.get("title") || "").trim();
+  ui.tab = "meals";
+  history.replaceState(null, "", location.pathname);
+  setTimeout(() => { if (saveLink(text, title)) render(); }, 0);
+})();
 
 render();
 
