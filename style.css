@@ -151,6 +151,8 @@ input[type="checkbox"] { width: 26px; min-height: 26px; height: 26px; accent-col
   font-weight: 700;
   font-size: 0.9rem;
 }
+.code { display: block; font: 600 1rem ui-monospace, monospace; letter-spacing: 0.04em; word-break: break-all;
+  background: var(--sunken); padding: 10px; border-radius: 8px; }
 .notes { margin: 6px 0; padding-left: 18px; color: var(--warn); font-size: 0.85rem; }
 .notes li + li { margin-top: 2px; }
 label.check { color: var(--ink); font-size: 0.95rem; margin: 4px 12px 4px 0; gap: 8px; }

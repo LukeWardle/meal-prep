@@ -49,9 +49,12 @@ let state = (() => {
   } catch { return blank(); }
 })();
 
-function save() {
+function save({ fromSync = false } = {}) {
   try { localStorage.setItem(STORE, JSON.stringify(state)); }
   catch { toast("Couldn't save on this phone. Storage is full or blocked."); }
+  // Every change is sent to the other devices a moment later (not when the
+  // change itself came from them).
+  if (!fromSync && typeof scheduleSync === "function") scheduleSync();
 }
 
 const ui = { tab: "meals", edit: null, day: localDate(new Date()), openGroups: new Set() };
@@ -1113,6 +1116,7 @@ function renderToday(app) {
     app.append(h("div", { class: "empty", text: "Save a meal and you can log portions of it here." }));
   }
 
+  renderSync(app);
   renderData(app);
 }
 
@@ -1135,6 +1139,165 @@ function removeEaten(id) {
 }
 
 /* ---------------------------------------------------------------- your data */
+
+/* ---------------------------------------------------------------- sync
+ * The phone and the tablet share one copy online (Supabase project
+ * "meal-prep"). A household is a long random code; the database only shows a
+ * device the rows for the code it sends. The sums are in logic.js
+ * (changesToSend, applyFromServer) and tested there. */
+
+const SYNC_URL = "https://amjlcpeinqonwgnppghu.supabase.co/rest/v1/docs";
+const SYNC_KEY = "sb_publishable_kpmQWHX9oaGcSePAX3gzNg_mdtWqMyk"; // public by design; the code is the secret
+const SYNC_STORE = "mealprep:sync";
+const SYNC_EVERY_MS = 30000;
+const EPOCH = "1970-01-01T00:00:00Z";
+
+let sync = (() => {
+  try { return { cursor: EPOCH, known: {}, ...(JSON.parse(localStorage.getItem(SYNC_STORE)) || {}) }; }
+  catch { return { cursor: EPOCH, known: {} }; }
+})();
+const syncUi = { busy: false, status: "", timer: null };
+
+function saveSync() {
+  try { localStorage.setItem(SYNC_STORE, JSON.stringify(sync)); } catch { /* storage full or blocked */ }
+}
+
+/** A new household code: 32 letters and digits, without look-alikes (0/O, 1/l). */
+function newHouseholdCode() {
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map((b) => chars[b % chars.length]).join("");
+}
+const tidyCode = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const showCode = (c) => c.match(/.{1,4}/g).join("-");
+
+function scheduleSync(delay = 2500) {
+  if (!sync.household) return;
+  clearTimeout(syncUi.timer);
+  syncUi.timer = setTimeout(syncNow, delay);
+}
+
+async function syncFetch(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { apikey: SYNC_KEY, "x-household": sync.household, "Content-Type": "application/json",
+      ...(options.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`sync ${res.status}`);
+  return res;
+}
+
+async function syncNow() {
+  if (!sync.household || syncUi.busy) return;
+  if (!navigator.onLine) { syncUi.status = "offline"; return; }
+  syncUi.busy = true;
+  try {
+    // 1. Fetch what the other device changed.
+    const rows = [];
+    for (let offset = 0; ; offset += 500) {
+      const q = `?select=key,value,deleted,updated_at&updated_at=gt.${encodeURIComponent(sync.cursor)}`
+        + `&order=updated_at.asc,key.asc&limit=500&offset=${offset}`;
+      const page = await (await syncFetch(SYNC_URL + q)).json();
+      rows.push(...page);
+      if (page.length < 500) break;
+    }
+    if (rows.length) {
+      const out = L.applyFromServer(state, sync.known, rows);
+      state = out.state;
+      sync.known = out.known;
+      sync.cursor = rows[rows.length - 1].updated_at;
+      save({ fromSync: true });
+      saveSync();
+      // Don't redraw under someone's fingers.
+      const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+      if (out.applied && !ui.edit && !typing) render();
+    }
+    // 2. Send what this device changed.
+    const changes = L.changesToSend(state, sync.known);
+    for (let i = 0; i < changes.length; i += 200) {
+      const chunk = changes.slice(i, i + 200);
+      await syncFetch(SYNC_URL, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(chunk.map((c) => ({ household: sync.household, key: c.key, value: c.value, deleted: c.deleted }))),
+      });
+      for (const c of chunk) {
+        if (c.deleted) delete sync.known[c.key]; else sync.known[c.key] = L.fingerprint(c.value);
+      }
+      saveSync();
+    }
+    sync.lastOk = new Date().toISOString();
+    syncUi.status = "ok";
+    saveSync();
+  } catch {
+    syncUi.status = navigator.onLine ? "error" : "offline";
+  } finally {
+    syncUi.busy = false;
+    const el = document.getElementById("sync-status");
+    if (el) el.textContent = syncStatusText();
+  }
+}
+
+function syncStatusText() {
+  if (syncUi.status === "offline") return "No signal. Changes are kept and sent when you're back online.";
+  if (syncUi.status === "error") return "Couldn't reach the sync server just now. It will try again.";
+  if (!sync.lastOk) return "Not synced yet.";
+  const mins = Math.round((Date.now() - Date.parse(sync.lastOk)) / 60000);
+  return mins < 1 ? "Synced just now." : `Synced ${plural(mins, "minute")} ago.`;
+}
+
+function startSyncing(code) {
+  sync = { household: code, cursor: EPOCH, known: {} };
+  saveSync();
+  syncUi.status = "";
+  toast("Syncing started. Your data is combined with the other device's.");
+  render();
+  syncNow().then(render);
+}
+
+function stopSyncing() {
+  if (!confirm("Stop syncing on this device? Everything stays on this device; it just stops sharing.")) return;
+  sync = { cursor: EPOCH, known: {} };
+  saveSync();
+  render();
+}
+
+function renderSync(app) {
+  const card = h("div", { class: "card stack" });
+  app.append(h("h2", { text: "Sync with your other devices" }), card);
+  if (!sync.household) {
+    const input = h("input", { placeholder: "Paste the household code", autocomplete: "off", "aria-label": "Household code" });
+    card.append(
+      h("p", { class: "muted", text: "Share meals, links, the shopping list and ticks between the phone and the tablet." }),
+      h("button", { class: "primary block", onclick: () => startSyncing(newHouseholdCode()) },
+        "Start syncing (on the first device)"),
+      h("p", { class: "faint", text: "Already started on the other device? Enter its code:" }),
+      input,
+      h("button", { class: "block", onclick: () => {
+        const code = tidyCode(input.value);
+        if (code.length < 24) return toast("That code looks too short. It's 32 letters and numbers.");
+        startSyncing(code);
+      } }, "Join"));
+    return;
+  }
+  const link = `${location.origin}${location.pathname}?join=${sync.household}`;
+  const codeText = h("code", { class: "code", text: showCode(sync.household), hidden: !syncUi.showCode });
+  card.append(
+    h("p", { id: "sync-status", text: syncStatusText() }),
+    h("div", { class: "grid2" },
+      h("button", { onclick: () => { syncUi.status = ""; syncNow(); toast("Syncing…"); } }, "Sync now"),
+      h("button", { onclick: async () => {
+        try {
+          if (navigator.share) await navigator.share({ title: "Join our Meal Prep", text: link });
+          else { await navigator.clipboard.writeText(link); toast("Join link copied."); }
+        } catch { /* cancelled */ }
+      } }, "Send join link")),
+    h("button", { class: "small", onclick: () => { syncUi.showCode = !syncUi.showCode; render(); } },
+      syncUi.showCode ? "Hide code" : "Show household code"),
+    codeText,
+    h("p", { class: "faint", text: "Anyone with this code or link can see and change your meals and lists, so only send it to your own devices." }),
+    h("button", { class: "small danger", onclick: stopSyncing }, "Stop syncing on this device"));
+}
 
 function renderData(app) {
   const fileInput = h("input", { type: "file", accept: "application/json,.json", hidden: true,
@@ -1266,6 +1429,23 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   setTimeout(() => { if (saveLink(text, title)) render(); }, 0);
 })();
 
+/* Join link: ?join=<code> opens the app ready to join that household. */
+(() => {
+  const code = tidyCode(new URLSearchParams(location.search).get("join"));
+  if (!code) return;
+  history.replaceState(null, "", location.pathname);
+  if (code.length < 24 || code === sync.household) return;
+  setTimeout(() => {
+    if (confirm("Join this household? Meals, links and the shopping list will be shared with the other device.")) {
+      ui.tab = "today";
+      startSyncing(code);
+    }
+  }, 300);
+})();
+
 render();
 
-loadBuiltInMeals();
+loadBuiltInMeals().then(() => syncNow());
+setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, SYNC_EVERY_MS);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncNow(); });
+window.addEventListener("online", () => { syncUi.status = ""; syncNow(); });

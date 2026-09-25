@@ -153,6 +153,103 @@
       .map(([shop, items]) => ({ shop, items: items.sort((a, b) => a.name.localeCompare(b.name)) }));
   }
 
+  /* ---------------------------------------------------------- syncing
+   * The synced data is split into small documents, one per meal, food,
+   * everyday item and logged portion, plus the shopping list in four parts. A
+   * device remembers a fingerprint of each document as it last agreed with the
+   * server ("known"), so it can tell what it has changed since. */
+
+  const PREP_PARTS = ["items", "extras", "ticked", "shopOverride"];
+
+  function fingerprint(value) {
+    const s = JSON.stringify(value);
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return `${(h >>> 0).toString(36)}.${s.length}`;
+  }
+
+  /** The state as documents: { key: value }. */
+  function docsFromState(state) {
+    const docs = {};
+    for (const m of state.meals || []) docs[`meal:${m.id}`] = m;
+    for (const f of state.ingredients || []) docs[`food:${f.id}`] = f;
+    for (const s of state.saved || []) docs[`saved:${s.id}`] = s;
+    for (const e of state.eaten || []) docs[`eaten:${e.id}`] = e;
+    for (const part of PREP_PARTS) docs[`prep:${part}`] = (state.prep && state.prep[part]) || {};
+    docs.shops = state.shops || [];
+    docs.builtInSeen = state.builtInSeen || [];
+    return docs;
+  }
+
+  /** What this device has changed since it last agreed with the server:
+   *  [{ key, value, deleted }]. */
+  function changesToSend(state, known) {
+    const docs = docsFromState(state);
+    const out = [];
+    for (const [key, value] of Object.entries(docs)) {
+      if (known[key] !== fingerprint(value)) out.push({ key, value, deleted: false });
+    }
+    for (const key of Object.keys(known)) {
+      if (!(key in docs)) out.push({ key, value: null, deleted: true });
+    }
+    return out;
+  }
+
+  /** Applies documents from the server. A document this device has changed and
+   *  not yet sent is left as it is (it's sent next, so the latest edit wins).
+   *  Lists of shops and "already added" built-in meals are merged, not replaced.
+   *  Returns { state, known, applied }. `state` and `known` aren't changed. */
+  function applyFromServer(state, known, rows) {
+    const next = {
+      ...state,
+      meals: [...(state.meals || [])],
+      ingredients: [...(state.ingredients || [])],
+      saved: [...(state.saved || [])],
+      eaten: [...(state.eaten || [])],
+      prep: { ...(state.prep || {}) },
+    };
+    const kn = { ...known };
+    const local = docsFromState(state);
+    const lists = { meal: "meals", food: "ingredients", saved: "saved", eaten: "eaten" };
+    let applied = 0;
+    for (const row of rows) {
+      const { key } = row;
+      const unsent = key in local ? kn[key] !== fingerprint(local[key]) : kn[key] !== undefined;
+      if (key === "shops" || key === "builtInSeen") {
+        const merged = [...new Set([...(next[key] || []), ...((!row.deleted && row.value) || [])])];
+        next[key] = merged;
+        if (!unsent) kn[key] = fingerprint(row.deleted ? [] : row.value);
+        applied++;
+        continue;
+      }
+      const [kind, ...rest] = key.split(":");
+      const id = rest.join(":");
+      // First time this device sees this part of the shopping list: combine the
+      // two (an empty list on a newly joined device mustn't wipe the other's).
+      // Left unsent, so the combined list is what gets sent back.
+      if (kind === "prep" && PREP_PARTS.includes(id) && kn[key] === undefined && !row.deleted) {
+        next.prep[id] = { ...(row.value || {}), ...(next.prep[id] || {}) };
+        applied++;
+        continue;
+      }
+      if (unsent) continue;
+      if (kind === "prep" && PREP_PARTS.includes(id)) {
+        next.prep[id] = row.deleted ? {} : (row.value || {});
+      } else if (lists[kind]) {
+        const list = next[lists[kind]];
+        const i = list.findIndex((x) => x.id === id);
+        if (row.deleted) { if (i !== -1) list.splice(i, 1); }
+        else if (i === -1) list.push(row.value);
+        else list[i] = row.value;
+      } else {
+        continue;
+      }
+      if (row.deleted) delete kn[key]; else kn[key] = fingerprint(row.value);
+      applied++;
+    }
+    return { state: next, known: kn, applied };
+  }
+
   /** The first web link in some shared text: "Watch this! https://youtu.be/abc" → the link. */
   function findLink(text) {
     const m = String(text || "").match(/https?:\/\/[^\s<>"']+/i);
@@ -346,7 +443,8 @@
 
   root.MealLogic = {
     MACROS, UNITS, CATEGORIES, groupMeals, labelFactor, productFor, mealTotals, perPortion, packsNeeded,
-    shoppingList, addExtras, mealAllergens, findLink, nameFromLink, dayTotals, formatAmount, validateBackup,
+    shoppingList, addExtras, mealAllergens, findLink, nameFromLink, dayTotals,
+    fingerprint, docsFromState, changesToSend, applyFromServer, formatAmount, validateBackup,
     parseQuantity, fromOpenFoodFacts, guessShop, mergeMeals,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
